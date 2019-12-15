@@ -1,0 +1,225 @@
+## Lektüre & Quiz: `S3` 
+
+Lesen Sie das [`S3`](https://adv-r.hadley.nz/s3.html) Kapitel von H. Wickham's *Advanced R*. 
+Bearbeiten Sie (mindestens) die folgenden von dort übernommenen/inspirierten Aufgaben:
+
+- Was tut die `as.data.frame.data.frame()` Methode? Warum ist das verwirrend? Wie können Sie derartige Verwirrung in Ihrem eigenen Code vermeiden?
+
+``` r
+library(sloop)
+ftype(as.data.frame)
+[1] "S3"      "generic"
+s3_methods_generic("as.data.frame")
+# A tibble: 30 x 4
+   generic       class      visible source             
+   <chr>         <chr>      <lgl>   <chr>              
+ 1 as.data.frame aovproj    FALSE   registered S3method
+ 2 as.data.frame array      TRUE    base               
+ 3 as.data.frame AsIs       TRUE    base               
+ 4 as.data.frame character  TRUE    base               
+ 5 as.data.frame complex    TRUE    base               
+ 6 as.data.frame data.frame TRUE    base
+# ...
+```
+Die Methode wendet die generische Funktion `as.data.frame()` für Klasse `data.frame` an. Es ist verwirrend, weil man nicht weiß, wofür einzelne Punkte in der Methode dienen: z.B. heißt die Funktion einfach `data.frame()` oder ist es eine Methode `data()` für class `frame`. Deswegen sollte man eine Funktion lieber `as_data_frame()` und eine Klasse `data_frame` benennen. Dann würde die Methode `as_data_frame.data_frame()` heißen und es wäre sofort klar, wo die generische Funktion endet und wo der Klassenname beginnt.
+
+- Beschreiben/erklären Sie das Verhalten dieses Codes:
+```r
+set.seed(1014)
+some_days <- as.Date("2019-11-24") + sample(10, 5)
+mean(some_days)
+# [1] "2019-11-30"
+mean(unclass(some_days))
+# [1] 18230.4
+```
+Die Klasse von `some_days`:
+```r
+class(some_days)
+[1] "Date"
+```
+Also, was in `mean(some_days)` genau passiert, ist folgendes:
+```r
+mean.Date(some_days)
+[1] "2019-11-30"
+```
+Das heißt, es wird die Funktion `mean()` für Klasse `Date` angewendet. Wenn man aber `unclass(some_days)` aufruft, werden die Dates zu numerischen Werten und
+es wird die Methode `mean.default()` angewendet:
+```r
+unclass(some_days)
+[1] 18231 18229 18230 18234 18228
+
+x <- unclass(some_days)
+mean(x)
+[1] 18230.4
+
+# äquivalent zu:
+mean(unclass(some_days))
+[1] 18230.4
+
+# um die angewendete Methode zu sehen:
+> s3_dispatch(mean(unclass(some_days)))
+   mean.double
+   mean.numeric
+=> mean.default
+```
+
+- Welche Klasse hat `x` im folgenden Code? Auf welchem *base type* basiert diese Klasse? Welche Attribute nutzt sie und wie sind die mathematischen Eigenschaften von Verteilungsfunktionen hier konkret implementiert? 
+```r
+x <- ecdf(rpois(100, 10))
+x
+# Empirical CDF 
+# Call: ecdf(rpois(100, 10))
+#  x[1:15] =      1,      4,      5,  ...,     16,     17
+
+# 3 Klassen:
+class(x)
+[1] "ecdf"     "stepfun"  "function"
+
+# Base type
+typeof(x)
+[1] "closure"
+
+# Attribute
+attributes(x)
+$class
+[1] "ecdf"     "stepfun"  "function"
+
+$call
+ecdf(rpois(100, 10))
+```
+Mathematisch gesehen ist `ecdf` eine Stepfunktion mit Sprüngen an Beobachtungswerten:
+```r
+stats:::ecdf
+function (x) 
+{
+    x <- sort(x)
+    n <- length(x)
+    if (n < 1) 
+        stop("'x' must have 1 or more non-missing values")
+    vals <- unique(x)
+    rval <- approxfun(vals, cumsum(tabulate(match(x, vals)))/n, 
+        method = "constant", yleft = 0, yright = 1, f = 0, 
+        ties = "ordered")
+    class(rval) <- c("ecdf", "stepfun", class(rval))
+    assign("nobs", n, envir = environment(rval))
+    attr(rval, "call") <- sys.call()
+    rval
+}
+<bytecode: 0x000001dcc0032ea0>
+<environment: namespace:stats>
+```
+
+- Schreiben Sie einen neuen low-level Konstruktor für `data.frame`-Objekte (ohne die Funktionen `as.data.frame()` oder `data.frame()` zu benutzen, selbstverständlich). Machen Sie sich zunächst klar: Auf welchem *base type* basiert `data.frame`? Welche Attribute nutzt `data.frame`? Welche Restriktionen gelten für die verschiedenen Einträge und Attribute?  
+    *Hinweis*: Sehen Sie sich dafür zunächst mal so etwas wie `str(unclass(<irgend ein data.frame>))` an.
+    
+```r 
+new_data.frame <- function(x, n, row.names = NULL) {
+  stopifnot(is.list(x))
+  stopifnot(all(lengths(x) == n))
+  if (is.null(row.names)) {
+    row.names <- .set_row_names(n)
+  } else {
+    stopifnot(is.character(row.names), length(row.names == n))
+  }
+  
+  structure(x, class = "data.frame", row.names = row.names)
+}
+```
+- Kategorisieren Sie die Klassen der Rückgabe-Objekte von `lm(), factor(), table(), as.Date(), as.POSIXct(), ecdf(), ordered(), I()` in die Klassentypen *vector class*, *record style class*, *scalar class*, die in *Advanced R* beschrieben  werden.
+
+```r
+# Object styles:
+# - record style (POSIXlt)
+# - vectors (data.frame)
+# - scalar objects (lm)
+
+# lm(): scalar (because one model)
+# factor(): vector
+# table(): vector
+# as.Date(): vector
+# as.POSIXct(): record
+# ecdf(): scalar
+# ordered(): vector
+# I(): ?
+```
+- Wie sähe ein Konstruktor `new_lm` für Objekte der Klasse `lm` aus? Warum wäre ein solcher Konstruktor vermutlich nicht besonders nützlich?
+
+Ein Konstruktor für `lm` sollte die folgenden Attribute und Klasse haben:
+```r
+attributes(lm(price ~ ., data = diamonds))
+$names
+ [1] "coefficients"  "residuals"     "effects"       "rank"          "fitted.values" "assign"       
+ [7] "qr"            "df.residual"   "contrasts"     "xlevels"       "call"          "terms"        
+[13] "model"        
+
+$class
+[1] "lm"
+
+# Also:
+new_lm <- function("coefficients", "residuals", "effects",
+                   "rank", "fitted.values", "assign", "qr", 
+                   "df.residual", "contrasts", "xlevels",
+                   "call", "terms", "model") {
+  # validate inputs:
+  stopifnot(is.numeric(coefficients), is.numeric(residuals),
+  is.numeric(effects), is.integer(rank), is.double(fitted.values)
+  # ... further validations
+  )
+  
+  structure(
+  list(coefficients = coefficients,
+       residuals = residuals,
+       effects = effects
+       # ...
+       ),
+       class = lm
+  )
+}
+
+```
+Die ganzen Überprüfungen der Inputs könnte man in eine separate `validate_lm` Funktion 
+reinpacken.
+
+- Lesen Sie den Quellcode für `t()` und `t.test()`. Ist `t.test()` eine generische S3 Funktion oder eine S3 Methode? Was passiert im Detail, wenn sie `t()` auf ein S3-Objekt mit Klasse `test` anwenden (s.u.)? Warum?
+
+`t()` wie auch `t.test()` sind beide generische Funktionen:
+```r
+ftype(t.test)
+[1] "S3"      "generic"
+
+ftype(t)
+[1] "S3"      "generic"
+```
+Man erkennt es auch daran, dass sie beide `UseMethod()` verwenden:
+```r
+t
+function (x) 
+UseMethod("t")
+<bytecode: 0x000001dcbb507768>
+<environment: namespace:base>
+
+t.test
+function (x, ...) 
+UseMethod("t.test")
+<bytecode: 0x000001dcb7796a60>
+<environment: namespace:stats>
+```
+
+Hier wird zuerst `t()` mit class `test` verbunden - daraus wird eine methode `t.test()`
+der generischen Funktion `t()`. Aber `t.test()` ist bereits eine generische Funktion an sich, deswegen sucht sie nach ``t.test`.class_name, also `t.test.test`, findet diese aber nicht, macht also dispatch zu `t.test.default`, was eine Methode der generischen `t.test`-Funktion ist:
+```r
+x <- structure(1:10, class = "test")
+t(x)
+
+   One Sample t-test
+
+data:  x
+t = 5.7446, df = 9, p-value = 0.0002782
+alternative hypothesis: true mean is not equal to 0
+95 percent confidence interval:
+ 3.334149 7.665851
+sample estimates:
+mean of x 
+      5.5
+```
+
